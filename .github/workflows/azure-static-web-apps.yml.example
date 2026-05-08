@@ -1,0 +1,72 @@
+# Reference workflow for Azure Static Web Apps deployment.
+#
+# This file is named `.example` so GitHub Actions does not pick it up
+# automatically. To activate, copy to `azure-static-web-apps.yml` and
+# replace the placeholder secret name with your own.
+#
+# Recommended path: don't activate this. Use the Azure Portal SWA wizard
+# to generate a workflow with your specific deployment token name baked in.
+# See the README for details.
+
+name: Azure Static Web Apps CI/CD
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+    branches:
+      - main
+
+jobs:
+  build_and_deploy_job:
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'closed')
+    runs-on: ubuntu-latest
+    name: Build and Deploy Job
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+          lfs: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install and build
+        env:
+          # Optional. When unset, analytics is disabled and the site still works.
+          # The connection string is embedded in the static bundle and is not
+          # a privileged secret. See SECURITY.md.
+          VITE_APPINSIGHTS_CONNECTION_STRING: ${{ secrets.VITE_APPINSIGHTS_CONNECTION_STRING }}
+        run: |
+          npm ci
+          npm run docs:build
+
+      - name: Deploy
+        id: builddeploy
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          # Replace AZURE_STATIC_WEB_APPS_API_TOKEN with the actual secret name
+          # Azure provisions for you, e.g. AZURE_STATIC_WEB_APPS_API_TOKEN_HAPPY_DESERT_12345.
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          action: "upload"
+          app_location: "docs/.vitepress/dist"
+          api_location: ""
+          skip_app_build: true
+          output_location: ""
+
+  close_pull_request_job:
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    name: Close Pull Request Job
+    steps:
+      - name: Close Pull Request
+        id: closepullrequest
+        uses: Azure/static-web-apps-deploy@v1
+        with:
+          azure_static_web_apps_api_token: ${{ secrets.AZURE_STATIC_WEB_APPS_API_TOKEN }}
+          action: "close"

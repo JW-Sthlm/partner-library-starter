@@ -1,0 +1,425 @@
+<#
+.SYNOPSIS
+  EXAMPLE / SAMPLE — Weekly KPI report for a Partner Library site.
+
+  This is a TEMPLATE FILE. To use:
+    1. Rename to remove the .example suffix:
+         Rename-Item weekly-analytics-report.ps1.example weekly-analytics-report.ps1
+    2. Update the parameter defaults below (or pass them at invocation time):
+         -AppName, -ResourceGroup, -Subscription, -To
+    3. Update $siteUrl near the top to your deployed Static Web App URL
+    4. Update the tenant placeholder in the error message section if you use
+       a non-default tenant for `az login`.
+
+.DESCRIPTION
+  Queries Application Insights for visitor metrics, top pages, top outbound
+  links, and top search queries over a rolling window (default 7 days), then
+  emails an HTML report via Outlook COM.
+
+  Designed to run unattended via Windows Task Scheduler. If `az` auth has
+  expired or the query fails, the script emails a short error notice instead
+  of metrics, so you'll always know the job ran.
+
+  KNOWN LIMITATIONS:
+  - Windows + Outlook only. The send path uses Outlook COM Automation.
+  - Application Insights connection via `az monitor app-insights query` (CLI).
+  - Sample assumes you've instrumented `OutboundLinkClick` events via the
+    bundled analytics.ts. The "Top search queries" section assumes a
+    `SearchQuery` custom event you've added to your search component (the
+    starter does not ship one out of the box). The script will simply show
+    "No searches in this window." if no events are present.
+
+.PARAMETER Days
+  Reporting window in days. Default 7.
+
+.PARAMETER To
+  Recipient address.
+
+.PARAMETER AppName
+  Application Insights resource name.
+
+.PARAMETER ResourceGroup
+  Resource group containing the AppInsights resource.
+
+.PARAMETER Subscription
+  Azure subscription to set as active before querying. Accepts subscription
+  name or GUID.
+
+.PARAMETER NoSend
+  Build the report and write it to disk only — don't email. Useful for testing.
+
+.EXAMPLE
+  .\weekly-analytics-report.ps1
+  # Uses the parameter defaults below.
+
+.EXAMPLE
+  .\weekly-analytics-report.ps1 -Days 30 -NoSend
+  # Build a 30-day report and just save the HTML.
+#>
+
+[CmdletBinding()]
+param(
+  [int]$Days = 7,
+
+  # >>> EDIT THESE DEFAULTS <<<
+  [string]$To = 'you@example.com',
+  [string]$AppName = 'appi-partner-library',
+  [string]$ResourceGroup = 'rg-partner-library',
+  [string]$Subscription = '<your-subscription-name-or-guid>',
+
+  [switch]$NoSend
+)
+
+$ErrorActionPreference = 'Stop'
+
+# >>> EDIT THIS <<<
+$siteUrl = 'https://<your-swa-hostname>.azurestaticapps.net'
+
+# Optional: link to the Azure Portal AppInsights overview blade. Leave the
+# subscription/tenant placeholders or fill in your own. If you don't want a
+# portal link in the email footer, set $portalLink = $null.
+$portalLink = "https://portal.azure.com/#resource/subscriptions/<your-subscription-guid>/resourceGroups/$ResourceGroup/providers/microsoft.insights/components/$AppName/overview"
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+function Invoke-AppInsightsQuery {
+  param(
+    [Parameter(Mandatory)][string]$Kql,
+    [string]$Label = 'query'
+  )
+
+  $json = az monitor app-insights query `
+    --app $AppName `
+    --resource-group $ResourceGroup `
+    --analytics-query $Kql `
+    -o json 2>&1
+
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "[$Label] failed. KQL was:`n$Kql" -ForegroundColor Yellow
+    throw "AppInsights query [$Label] failed: $json"
+  }
+
+  $parsed = $json | ConvertFrom-Json
+  $table = $parsed.tables | Where-Object { $_.name -eq 'PrimaryResult' } | Select-Object -First 1
+  if (-not $table) { return @() }
+
+  $cols = $table.columns | ForEach-Object { $_.name }
+  $rows = @()
+  foreach ($row in $table.rows) {
+    $obj = [ordered]@{}
+    for ($i = 0; $i -lt $cols.Count; $i++) {
+      $obj[$cols[$i]] = $row[$i]
+    }
+    $rows += [pscustomobject]$obj
+  }
+  return $rows
+}
+
+function Format-Delta {
+  param([double]$This, [double]$Last)
+  if ($Last -eq 0 -and $This -eq 0) { return '<span class="delta neutral">&mdash;</span>' }
+  if ($Last -eq 0) { return '<span class="delta up">new</span>' }
+  $pct = [math]::Round((($This - $Last) / $Last) * 100)
+  $sign = if ($pct -gt 0) { '+' } else { '' }
+  $cls = if ($pct -gt 0) { 'up' } elseif ($pct -lt 0) { 'down' } else { 'neutral' }
+  $arrow = if ($pct -gt 0) { 'up' } elseif ($pct -lt 0) { 'down' } else { 'flat' }
+  return "<span class=`"delta $cls`">$arrow $sign$pct%</span>"
+}
+
+function HtmlEscape { param([string]$s) if ($null -eq $s) { return '' }; [System.Web.HttpUtility]::HtmlEncode($s) }
+function Format-Number { param($n) if ($null -eq $n) { return '0' }; '{0:N0}' -f [double]$n }
+
+# ---------------------------------------------------------------------------
+# Set subscription, run queries
+# ---------------------------------------------------------------------------
+
+Add-Type -AssemblyName System.Web | Out-Null
+
+try {
+  az account set --subscription $Subscription 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "Could not select subscription '$Subscription'. Run 'az login' first." }
+
+  $thisStart = "ago($($Days)d)"
+  $lastStart = "ago($($Days * 2)d)"
+  $lastEnd   = "ago($($Days)d)"
+
+  # Note: `az monitor app-insights query` rejects the parenthesized-subquery
+  # `union (q1), (q2)` pattern with BadArgumentError, so we run two queries
+  # and combine in PowerShell.
+  function Get-KpiRow {
+    param([string]$Start, [string]$End)
+    $kql = "pageViews | where timestamp between ($Start .. $End) | summarize visitors=dcount(user_Id), sessions=dcount(session_Id), pviews=count(), pps=iff(dcount(session_Id)==0, 0.0, todouble(count())/todouble(dcount(session_Id)))"
+    return (Invoke-AppInsightsQuery -Kql $kql -Label 'kpi' | Select-Object -First 1)
+  }
+
+  $thisRow = Get-KpiRow -Start $thisStart -End 'now()'
+  $lastRow = Get-KpiRow -Start $lastStart -End $lastEnd
+
+  function Val { param($obj, $field) if ($null -eq $obj) { 0 } else { [double]($obj.$field) } }
+
+  $thisVisitors = Val $thisRow visitors
+  $lastVisitors = Val $lastRow visitors
+  $thisSessions = Val $thisRow sessions
+  $lastSessions = Val $lastRow sessions
+  $thisViews    = Val $thisRow pviews
+  $lastViews    = Val $lastRow pviews
+  $thisPps      = Val $thisRow pps
+  $lastPps      = Val $lastRow pps
+
+  # ---- New vs returning ----
+  $nrQuery = @"
+let windowStart = $thisStart;
+let firstSeen = pageViews | summarize firstSeen = min(timestamp) by user_Id;
+pageViews
+| where timestamp > windowStart
+| join kind=leftouter firstSeen on user_Id
+| extend isNew = firstSeen >= windowStart
+| summarize visitors = dcount(user_Id) by isNew
+"@.Trim() -replace "`r`n", " "
+  $newReturning = Invoke-AppInsightsQuery -Kql $nrQuery -Label 'new-vs-returning'
+  $newVisitors      = ($newReturning | Where-Object { [string]$_.isNew -eq 'True'  -or $_.isNew -eq $true  } | Select-Object -First 1)
+  $returningVisitors = ($newReturning | Where-Object { [string]$_.isNew -eq 'False' -or $_.isNew -eq $false } | Select-Object -First 1)
+  $newCount       = if ($newVisitors)       { [int]$newVisitors.visitors }       else { 0 }
+  $returningCount = if ($returningVisitors) { [int]$returningVisitors.visitors } else { 0 }
+
+  # ---- Top pages ----
+  # parse_url(url).Path triggers BadArgumentError via az CLI; we summarize on
+  # the full url and strip the host client-side.
+  $topPagesQuery = @"
+pageViews
+| where timestamp > $thisStart
+| summarize pviews = count(), visitors = dcount(user_Id) by url, name
+| top 10 by pviews desc
+"@.Trim() -replace "`r`n", " "
+  $topPagesRaw = Invoke-AppInsightsQuery -Kql $topPagesQuery -Label 'top-pages'
+  $topPages = $topPagesRaw | ForEach-Object {
+    $path = $_.name
+    if ($_.url) {
+      try { $path = ([uri]$_.url).AbsolutePath } catch { $path = $_.name }
+    }
+    [pscustomobject]@{ path = $path; pviews = $_.pviews; visitors = $_.visitors }
+  }
+
+  # ---- Top outbound clicks ----
+  $topOutboundQuery = @"
+customEvents
+| where timestamp > $thisStart and name == 'OutboundLinkClick'
+| extend url = tostring(customDimensions.url)
+| summarize clicks = count() by url
+| top 10 by clicks desc
+"@.Trim() -replace "`r`n", " "
+  $topOutbound = Invoke-AppInsightsQuery -Kql $topOutboundQuery -Label 'top-outbound'
+
+  # ---- Top search queries (assumes a SearchQuery custom event in your search component) ----
+  $topSearchQuery = @"
+customEvents
+| where timestamp > $thisStart and name == 'SearchQuery'
+| extend query = tostring(customDimensions.query), resultsCount = toint(customDimensions.resultsCount)
+| summarize searches = count(), avgResults = round(avg(resultsCount), 1) by query
+| top 10 by searches desc
+"@.Trim() -replace "`r`n", " "
+  $topSearch = Invoke-AppInsightsQuery -Kql $topSearchQuery -Label 'top-searches'
+
+  # ---- Zero-result searches ----
+  $zeroSearchQuery = @"
+customEvents
+| where timestamp > $thisStart and name == 'SearchQuery' and toint(customDimensions.resultsCount) == 0
+| extend query = tostring(customDimensions.query)
+| summarize misses = count() by query
+| top 10 by misses desc
+"@.Trim() -replace "`r`n", " "
+  $zeroSearch = Invoke-AppInsightsQuery -Kql $zeroSearchQuery -Label 'zero-result-searches'
+
+  $queryError = $null
+}
+catch {
+  $queryError = $_.Exception.Message
+}
+
+# ---------------------------------------------------------------------------
+# Build HTML
+# ---------------------------------------------------------------------------
+
+$reportDate = (Get-Date).ToString('yyyy-MM-dd')
+$periodLabel = "Last $Days day" + ($(if ($Days -ne 1) { 's' } else { '' }))
+
+if ($queryError) {
+  $html = @"
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+body { font-family: 'Segoe UI', sans-serif; max-width: 720px; margin: 24px auto; color: #222; }
+h1 { font-size: 22px; }
+.error { background: #fff4f4; border: 1px solid #f0c0c0; padding: 16px; border-radius: 6px; }
+code { background: #f4f4f4; padding: 2px 6px; border-radius: 3px; }
+</style></head>
+<body>
+<h1>Partner Library &mdash; weekly report could not run</h1>
+<div class="error">
+<p>Querying Application Insights failed. Most likely reason: <code>az</code> auth expired.</p>
+<p><b>Fix:</b> open PowerShell and run <code>az login</code> (add <code>--tenant &lt;your-tenant-id&gt;</code> if you sign in to multiple tenants), then re-run the scheduled task.</p>
+<p><b>Error:</b> $(HtmlEscape $queryError)</p>
+</div>
+</body></html>
+"@
+}
+else {
+
+  function Render-LinkTable {
+    param($Rows, [string]$EmptyText)
+    if (-not $Rows -or $Rows.Count -eq 0) { return "<p class='empty'>$EmptyText</p>" }
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.AppendLine("<table class='kpi-table'><thead><tr><th>URL</th><th class='num'>Clicks</th></tr></thead><tbody>")
+    foreach ($r in $Rows) {
+      $url = HtmlEscape $r.url
+      $clicks = Format-Number $r.clicks
+      [void]$sb.AppendLine("<tr><td><a href='$url'>$url</a></td><td class='num'>$clicks</td></tr>")
+    }
+    [void]$sb.AppendLine("</tbody></table>")
+    return $sb.ToString()
+  }
+
+  function Render-PageTable {
+    param($Rows, [string]$EmptyText)
+    if (-not $Rows -or $Rows.Count -eq 0) { return "<p class='empty'>$EmptyText</p>" }
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.AppendLine("<table class='kpi-table'><thead><tr><th>Page</th><th class='num'>Views</th><th class='num'>Visitors</th></tr></thead><tbody>")
+    foreach ($r in $Rows) {
+      $path = HtmlEscape $r.path
+      [void]$sb.AppendLine("<tr><td><a href='$siteUrl$path'>$path</a></td><td class='num'>$(Format-Number $r.pviews)</td><td class='num'>$(Format-Number $r.visitors)</td></tr>")
+    }
+    [void]$sb.AppendLine("</tbody></table>")
+    return $sb.ToString()
+  }
+
+  function Render-SearchTable {
+    param($Rows, [string]$EmptyText)
+    if (-not $Rows -or $Rows.Count -eq 0) { return "<p class='empty'>$EmptyText</p>" }
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.AppendLine("<table class='kpi-table'><thead><tr><th>Query</th><th class='num'>Searches</th><th class='num'>Avg results</th></tr></thead><tbody>")
+    foreach ($r in $Rows) {
+      [void]$sb.AppendLine("<tr><td>$(HtmlEscape $r.query)</td><td class='num'>$(Format-Number $r.searches)</td><td class='num'>$($r.avgResults)</td></tr>")
+    }
+    [void]$sb.AppendLine("</tbody></table>")
+    return $sb.ToString()
+  }
+
+  function Render-ZeroSearchTable {
+    param($Rows, [string]$EmptyText)
+    if (-not $Rows -or $Rows.Count -eq 0) { return "<p class='empty'>$EmptyText</p>" }
+    $sb = New-Object System.Text.StringBuilder
+    [void]$sb.AppendLine("<table class='kpi-table'><thead><tr><th>Query (no results)</th><th class='num'>Misses</th></tr></thead><tbody>")
+    foreach ($r in $Rows) {
+      [void]$sb.AppendLine("<tr><td>$(HtmlEscape $r.query)</td><td class='num'>$(Format-Number $r.misses)</td></tr>")
+    }
+    [void]$sb.AppendLine("</tbody></table>")
+    return $sb.ToString()
+  }
+
+  $newPct = if ($thisVisitors -gt 0) { [math]::Round(($newCount / $thisVisitors) * 100) } else { 0 }
+  $ppsThis = if ($thisPps) { [math]::Round($thisPps, 1) } else { 0 }
+  $ppsLast = if ($lastPps) { [math]::Round($lastPps, 1) } else { 0 }
+
+  $portalRow = if ($portalLink) { " &middot; <a href=`"$portalLink`">Open in Azure Portal</a>" } else { '' }
+
+  $html = @"
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+body { font-family: 'Segoe UI', -apple-system, sans-serif; max-width: 760px; margin: 24px auto; color: #222; line-height: 1.5; }
+h1 { font-size: 22px; margin: 0 0 4px; }
+.subtitle { color: #666; font-size: 14px; margin-bottom: 24px; }
+h2 { font-size: 16px; margin-top: 32px; padding-bottom: 6px; border-bottom: 1px solid #eee; }
+.headline { display: flex; flex-wrap: wrap; gap: 12px; margin: 16px 0 24px; }
+.kpi { flex: 1; min-width: 140px; background: #f9f9fb; border: 1px solid #e9e9ee; border-radius: 8px; padding: 12px 14px; }
+.kpi-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: #777; }
+.kpi-value { font-size: 24px; font-weight: 700; margin: 4px 0; }
+.kpi-meta { font-size: 12px; color: #555; }
+.delta { font-size: 12px; font-weight: 600; padding: 1px 6px; border-radius: 3px; }
+.delta.up { color: #1a6b2e; background: #e6f4ea; }
+.delta.down { color: #a82323; background: #fce8e8; }
+.delta.neutral { color: #666; background: #eee; }
+table.kpi-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.kpi-table th { text-align: left; padding: 6px 8px; background: #f4f4f8; font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; color: #555; }
+table.kpi-table td { padding: 6px 8px; border-top: 1px solid #eee; }
+table.kpi-table td.num, table.kpi-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+table.kpi-table a { color: #0058b1; text-decoration: none; }
+table.kpi-table a:hover { text-decoration: underline; }
+.empty { color: #888; font-style: italic; font-size: 13px; }
+.footer { margin-top: 32px; padding-top: 12px; border-top: 1px solid #eee; font-size: 12px; color: #888; }
+.footer a { color: #0058b1; }
+</style></head>
+<body>
+
+<h1>Partner Library &mdash; Weekly KPIs</h1>
+<div class="subtitle">$periodLabel &middot; Generated $reportDate</div>
+
+<div class="headline">
+  <div class="kpi"><div class="kpi-label">Visitors</div><div class="kpi-value">$(Format-Number $thisVisitors)</div><div class="kpi-meta">$(Format-Delta $thisVisitors $lastVisitors) vs prev</div></div>
+  <div class="kpi"><div class="kpi-label">Sessions</div><div class="kpi-value">$(Format-Number $thisSessions)</div><div class="kpi-meta">$(Format-Delta $thisSessions $lastSessions) vs prev</div></div>
+  <div class="kpi"><div class="kpi-label">Page views</div><div class="kpi-value">$(Format-Number $thisViews)</div><div class="kpi-meta">$(Format-Delta $thisViews $lastViews) vs prev</div></div>
+  <div class="kpi"><div class="kpi-label">Pages / session</div><div class="kpi-value">$ppsThis</div><div class="kpi-meta">prev: $ppsLast</div></div>
+  <div class="kpi"><div class="kpi-label">New visitors</div><div class="kpi-value">$(Format-Number $newCount)</div><div class="kpi-meta">$newPct% of total &middot; returning: $(Format-Number $returningCount)</div></div>
+</div>
+
+<h2>Top pages</h2>
+$(Render-PageTable $topPages "No page views in this window.")
+
+<h2>Top outbound link clicks</h2>
+$(Render-LinkTable $topOutbound "No outbound link clicks tracked yet.")
+
+<h2>Top search queries</h2>
+$(Render-SearchTable $topSearch "No searches in this window.")
+
+<h2>Zero-result searches (gaps in the library)</h2>
+$(Render-ZeroSearchTable $zeroSearch "No zero-result searches &mdash; every query found something.")
+
+<div class="footer">
+  <a href="$siteUrl">$siteUrl</a>$portalRow
+</div>
+
+</body></html>
+"@
+}
+
+# ---------------------------------------------------------------------------
+# Persist + send
+# ---------------------------------------------------------------------------
+
+$reportsDir = Join-Path $PSScriptRoot '..\outputs\analytics-reports'
+if (-not (Test-Path $reportsDir)) { New-Item -ItemType Directory -Path $reportsDir | Out-Null }
+$reportPath = Join-Path $reportsDir "report-$reportDate.html"
+$html | Out-File -FilePath $reportPath -Encoding UTF8
+Write-Host "Report saved: $reportPath"
+
+if ($NoSend) {
+  Write-Host "NoSend specified — skipping email."
+  return
+}
+
+$subject = if ($queryError) {
+  "Partner library weekly report — query failed"
+} else {
+  "Partner library weekly KPIs — $reportDate"
+}
+
+# Outlook COM. Outlook desktop must be running.
+try {
+  $ol = New-Object -ComObject Outlook.Application
+  $mail = $ol.CreateItem(0)
+  $mail.To = $To
+  $mail.Subject = $subject
+  $mail.HTMLBody = $html
+  $mail.Importance = 1
+  $mail.Send()
+  Write-Host "Sent to $To"
+}
+catch {
+  Write-Warning "Email send failed: $_"
+  exit 1
+}
+finally {
+  if ($mail) { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($mail) | Out-Null }
+  if ($ol)   { [System.Runtime.InteropServices.Marshal]::ReleaseComObject($ol)   | Out-Null }
+}

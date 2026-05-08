@@ -1,0 +1,21 @@
+{
+  "name": "partner-library-starter",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Starter template for a Markdown-driven partner library on VitePress + Azure Static Web Apps.",
+  "license": "MIT",
+  "scripts": {
+    "docs:dev": "vitepress dev docs",
+    "docs:build": "vitepress build docs",
+    "docs:preview": "vitepress preview docs"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "vitepress": "^1.6.3",
+    "vue": "^3.5.13"
+  },
+  "dependencies": {
+    "@microsoft/applicationinsights-web": "^3.4.1"
+  }
+}

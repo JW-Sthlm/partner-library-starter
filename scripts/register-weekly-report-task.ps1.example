@@ -1,0 +1,116 @@
+<#
+.SYNOPSIS
+  EXAMPLE / SAMPLE — Registers the weekly KPI report as a Windows scheduled task.
+
+  This is a TEMPLATE FILE. To use:
+    1. Rename to remove the .example suffix:
+         Rename-Item register-weekly-report-task.ps1.example register-weekly-report-task.ps1
+    2. Make sure weekly-analytics-report.ps1 (no .example) exists in the same folder.
+    3. Run the script. It registers a Windows Task Scheduler entry for the
+       current user that fires weekly.
+
+.DESCRIPTION
+  Runs `weekly-analytics-report.ps1` every Monday at 09:00 local time by default.
+  Uses StartWhenAvailable so the task catches up when the laptop was off
+  at trigger time. Runs as the current user, only when logged on (Outlook
+  COM requires an interactive session).
+
+  Re-runnable: removes any existing task with the same name first.
+
+.PARAMETER TaskName
+  Scheduled task name. Default: PartnerLibrary-WeeklyReport.
+
+.PARAMETER Time
+  Time of day to run (24h "HH:mm"). Default: 09:00.
+
+.PARAMETER DayOfWeek
+  Day of week. Default: Monday.
+
+.PARAMETER Unregister
+  Remove the task instead of registering.
+
+.EXAMPLE
+  .\register-weekly-report-task.ps1
+  # Default: Monday 09:00 local.
+
+.EXAMPLE
+  .\register-weekly-report-task.ps1 -Time "07:00" -DayOfWeek "Friday"
+  # Custom schedule.
+
+.EXAMPLE
+  .\register-weekly-report-task.ps1 -Unregister
+  # Remove the scheduled task.
+#>
+
+[CmdletBinding()]
+param(
+  [string]$TaskName = 'PartnerLibrary-WeeklyReport',
+  [string]$Time = '09:00',
+  [ValidateSet('Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday')]
+  [string]$DayOfWeek = 'Monday',
+  [switch]$Unregister
+)
+
+$ErrorActionPreference = 'Stop'
+
+$reportScript = Join-Path $PSScriptRoot 'weekly-analytics-report.ps1'
+if (-not (Test-Path $reportScript)) {
+  throw "Cannot find weekly-analytics-report.ps1 at $reportScript. Did you remove the .example suffix from the report script first?"
+}
+
+# Pick the best available PowerShell host. Prefer pwsh (PS7) over Windows PowerShell.
+$pwshPath = (Get-Command pwsh -ErrorAction SilentlyContinue)?.Source
+if (-not $pwshPath) { $pwshPath = (Get-Command powershell -ErrorAction SilentlyContinue)?.Source }
+if (-not $pwshPath) { throw "Neither pwsh nor powershell.exe found on PATH." }
+
+# Remove any existing task by this name.
+$existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+if ($existing) {
+  Write-Host "Removing existing task '$TaskName'..."
+  Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
+}
+
+if ($Unregister) {
+  Write-Host "Unregistered '$TaskName'."
+  return
+}
+
+# Trigger: weekly, on the chosen day at the chosen time.
+$trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $DayOfWeek -At $Time
+
+# Action: run the report script with NoProfile (faster, isolated from $PROFILE).
+$action = New-ScheduledTaskAction `
+  -Execute $pwshPath `
+  -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$reportScript`""
+
+# Settings: catch up if missed, allow on battery, don't kill long runs.
+$settings = New-ScheduledTaskSettingsSet `
+  -StartWhenAvailable `
+  -AllowStartIfOnBatteries `
+  -DontStopIfGoingOnBatteries `
+  -ExecutionTimeLimit ([TimeSpan]::FromMinutes(15)) `
+  -MultipleInstances IgnoreNew
+
+# Principal: current user, only when logged on (Outlook COM requires interactive session).
+$principal = New-ScheduledTaskPrincipal `
+  -UserId "$env:USERDOMAIN\$env:USERNAME" `
+  -LogonType Interactive `
+  -RunLevel Limited
+
+$task = New-ScheduledTask `
+  -Action $action `
+  -Trigger $trigger `
+  -Settings $settings `
+  -Principal $principal `
+  -Description "Weekly KPI report for the Partner Library. Sends HTML email via Outlook COM."
+
+Register-ScheduledTask -TaskName $TaskName -InputObject $task | Out-Null
+
+Write-Host "Registered '$TaskName' — runs every $DayOfWeek at $Time."
+Write-Host "Script: $reportScript"
+Write-Host "Host:   $pwshPath"
+Write-Host ""
+Write-Host "Manage in Task Scheduler GUI under 'Task Scheduler Library', or:"
+Write-Host "  Get-ScheduledTask -TaskName $TaskName"
+Write-Host "  Start-ScheduledTask -TaskName $TaskName    # run now"
+Write-Host "  .\register-weekly-report-task.ps1 -Unregister"
