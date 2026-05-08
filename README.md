@@ -19,50 +19,68 @@ A small, opinionated starter for building a curated link library or knowledge si
 - Not a multi-tenant SaaS.
 - Not a Microsoft-supported product. You own your fork end to end.
 
-## Quick start (5 minutes)
+## Before you start
 
-```bash
-# 1. Use this template on GitHub ("Use this template" button), then clone your new repo.
-git clone https://github.com/<your-user>/<your-repo>.git
-cd <your-repo>
+You'll need:
 
-# 2. Install
-npm install
+| Requirement | Why | How to get it |
+|-------------|-----|---------------|
+| **GitHub account** | To use the template and host your repo | [github.com](https://github.com/signup) |
+| **Azure subscription** | To host the Static Web App and (optional) Application Insights. Free tier covers this for most uses. | [azure.microsoft.com/free](https://azure.microsoft.com/free) |
+| **Azure permissions** | Contributor on the subscription, or on a resource group you can use | Ask your Azure admin if unsure |
+| **Node.js 22+** | To preview the site locally and run the build | [nodejs.org](https://nodejs.org/) |
+| **PowerShell 7+** | The provisioning scripts are PowerShell. Cross-platform: Windows, macOS, Linux. | [Install PowerShell](https://learn.microsoft.com/powershell/scripting/install/installing-powershell) |
+| **Azure CLI** (`az`) | Used by `bootstrap.ps1` to create resources | [Install az CLI](https://learn.microsoft.com/cli/azure/install-azure-cli) |
+| **GitHub CLI** (`gh`) | Used by `bootstrap.ps1` to set repo secrets and detect the remote | [cli.github.com](https://cli.github.com/) |
+| **git** | To clone and push | Usually pre-installed; otherwise [git-scm.com](https://git-scm.com/) |
 
-# 3. Run locally
-npm run docs:dev
-# Opens http://localhost:5173
-```
-
-That's the core. Everything below is optional.
-
-## Deploy to Azure Static Web Apps
-
-Two paths. Pick one.
-
-### One-command provision (recommended)
-
-If you have **Azure CLI** and **GitHub CLI** installed and signed in, run from the root of your cloned repo:
+Sign in to both CLIs once:
 
 ```powershell
-# PowerShell 7+ (works on Windows, macOS, Linux)
+az login              # opens a browser, signs in to your Azure tenant
+gh auth login         # opens a browser, signs in to GitHub
+```
+
+That's the full prerequisite list. Total cost on Azure with the Free SKU and modest traffic: about $0/month. Application Insights ingestion has a 5 GB/month free quota that is plenty for a small site.
+
+## Set up your site (3 steps, ~5 minutes)
+
+```powershell
+# 1. Use this template on GitHub ("Use this template" button), then clone:
+git clone https://github.com/<your-user>/<your-repo>.git
+cd <your-repo>
+npm install
+
+# 2. Rebrand: site title, package name, copyright (interactive prompts)
+.\scripts\rebrand.ps1
+
+# 3. Provision Azure + GitHub secrets + activate workflow + push (one command)
 .\scripts\bootstrap.ps1 -Name <short-slug>
 ```
 
-That's it. The script provisions a resource group, Application Insights (workspace-based), and a Static Web App; sets the two GitHub secrets (`AZURE_STATIC_WEB_APPS_API_TOKEN`, `VITE_APPINSIGHTS_CONNECTION_STRING`); activates the deploy workflow; and pushes. First deploy runs in 2 to 3 minutes.
+After step 3 you have:
 
-Useful flags:
+- A live site at `https://<random>-<random>.azurestaticapps.net` (printed by the script)
+- Application Insights collecting page views and outbound clicks
+- A working CI/CD pipeline that auto-deploys on every push to `main`
+- Two GitHub secrets set automatically (`AZURE_STATIC_WEB_APPS_API_TOKEN`, `VITE_APPINSIGHTS_CONNECTION_STRING`)
+
+What still needs your attention:
+
+- `docs/` — sample pages for the structure. Replace with your real content.
+- `README.md` and `SUPPORT.md` — the "Johan's experiment" framing. Rewrite to match your project's voice.
+- Optional: gating with Entra ID. See [`docs/auth/entra-gating.md`](docs/auth/entra-gating.md).
+
+## Local preview
 
 ```powershell
-.\scripts\bootstrap.ps1 -Name acme -Location northeurope    # different region
-.\scripts\bootstrap.ps1 -Name acme -SkipAnalytics           # no telemetry
-.\scripts\bootstrap.ps1 -Name acme -SkipPush                # don't auto-push
-.\scripts\bootstrap.ps1 -Name acme -SubscriptionId "<id>"   # pick a subscription
+npm run docs:dev
+# Opens http://localhost:5173, hot-reloads on file changes
 ```
 
-Run `Get-Help .\scripts\bootstrap.ps1 -Full` for the full reference.
+## Deploy to Azure Static Web Apps
 
-Prerequisites: `az login`, `gh auth login`, repo cloned with a GitHub remote, PowerShell 7+.
+The bootstrap script above is the recommended flow. If you prefer to provision manually, two alternatives:
 
 ### Manual fallback: Azure Portal
 
@@ -131,13 +149,15 @@ The script depends on Outlook COM, so it's Windows + Outlook only. A cross-platf
 
 After you click "Use this template" and clone, run through this:
 
-- [ ] Update site title in `docs/.vitepress/config.ts`
-- [ ] Replace sample pages in `docs/` with your own content
-- [ ] Update navigation/sidebar in `docs/.vitepress/config.ts`
-- [ ] Run `.\scripts\bootstrap.ps1 -Name <slug>` to provision Azure and deploy (or follow the Portal fallback)
+## Template reset checklist
+
+Most of this is automated by `scripts\rebrand.ps1` and `scripts\bootstrap.ps1`. The only fully-manual bits are:
+
+- [ ] Replace sample pages in `docs/` with your real content
+- [ ] Update navigation/sidebar in `docs/.vitepress/config.ts` if you change page paths
 - [ ] Decide on gating: leave public, or follow `docs/auth/entra-gating.md`
-- [ ] Update `LICENSE` copyright line to your name/org
-- [ ] Edit `SUPPORT.md` and `README.md` to remove "this is Johan's experiment" framing and replace with your project's voice
+- [ ] Edit `README.md` and `SUPPORT.md` to remove "this is Johan's experiment" framing and replace with your project's voice
+- [ ] Optional: set `bootstrap.ps1 -SkipAnalytics` if you don't want telemetry (or skip running bootstrap entirely)
 - [ ] Delete `.github/workflows/*.example` and `scripts/*.example` if you're not using them
 
 ## Stack
