@@ -1,0 +1,117 @@
+name: Auto-Triage Link Suggestions
+
+# Triggers when a new issue is opened with the "link-suggestion" label.
+# Posts a friendly review comment with two big CTAs (open the link, comment
+# your verdict) and adds track labels detected from the issue body.
+#
+# Customize the track-detection block to match the values defined in
+# docs/.vitepress/data/tags.ts.
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  triage:
+    if: contains(github.event.issue.labels.*.name, 'link-suggestion')
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Triage and label
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const body = issue.body || '';
+
+            // Guard: skip if a triage comment already exists (prevents duplicates).
+            const existingComments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+            });
+            if (existingComments.data.some(c => c.body.includes('📋 New link to review'))) {
+              console.log('Triage comment already exists — skipping.');
+              return;
+            }
+
+            // ── Track detection ──
+            // Customize this block to match the `track` values you defined in
+            // docs/.vitepress/data/tags.ts. The default schema ships with
+            // track-a / track-b / cross-cutting as illustrative placeholders.
+            const tracks = [];
+            const lower = body.toLowerCase();
+            if (/track-a/.test(lower)) tracks.push('track-a');
+            if (/track-b/.test(lower)) tracks.push('track-b');
+            if (/cross-cutting/.test(lower)) tracks.push('cross-cutting');
+            if (tracks.length === 0) tracks.push('cross-cutting');
+
+            try {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                labels: tracks,
+              });
+            } catch (e) {
+              console.log('Could not add labels (they may not exist yet):', e.message);
+            }
+
+            // ── Optional: assign a reviewer ──
+            // Add your own routing logic here, e.g. read a team.yml file and
+            // pick a reviewer based on the detected track. Left out by default
+            // because it's project-specific.
+
+            // ── Parse issue form fields (### Label\n\nValue format) ──
+            function parseField(label) {
+              const re = new RegExp(`### ${label.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\s*\\n+([\\s\\S]*?)(?=\\n### |$)`);
+              const m = body.match(re);
+              if (!m) return '';
+              return m[1].trim().replace(/^_No response_$/i, '');
+            }
+
+            const suggestedUrl = parseField('Link URL') || (() => {
+              const m = body.match(/(https?:\/\/\S+)/);
+              return m ? m[1] : 'See issue body';
+            })();
+            const suggestedTitle = parseField('Title') || issue.title.replace(/^\[Link Suggestion\]\s*/i, '').trim();
+            const suggestedDesc = parseField('Description') || 'No description provided';
+            const suggestedCategory = parseField('Suggested Category') || 'Not specified';
+
+            // ── Post triage comment ──
+            // Designed to be scannable from an email notification.
+            const issueUrl = issue.html_url;
+            let comment = `## 📋 New link to review\n\n`;
+            comment += `### 1️⃣ Check the content\n`;
+            comment += `# **👉 [Open the suggested link](${suggestedUrl})**\n`;
+            comment += `Read it. Is this useful for the library?\n\n`;
+            comment += `### 2️⃣ Give your verdict\n`;
+            comment += `# **👉 [Go to the issue to comment](${issueUrl})**\n`;
+            comment += `Comment your decision, then assign to Copilot.\n\n`;
+            comment += `---\n\n`;
+            comment += `### Details\n\n`;
+            comment += `| | |\n|---|---|\n`;
+            comment += `| 📄 **Title** | ${suggestedTitle} |\n`;
+            comment += `| 🔗 **URL** | [${suggestedUrl}](${suggestedUrl}) |\n`;
+            comment += `| 📂 **Category** | ${suggestedCategory} |\n`;
+            comment += `| 🏷️ **Track** | ${tracks.join(', ')} |\n`;
+            comment += `\n> ${suggestedDesc}\n\n`;
+            comment += `---\n\n`;
+            comment += `### How to decide\n\n`;
+            comment += `| Your decision | What to comment | What happens next |\n`;
+            comment += `|--------------|----------------|-------------------|\n`;
+            comment += `| ✅ **Add it** | "looks good", "approve", or 👍 | Link gets validated, formatted, and added |\n`;
+            comment += `| ❌ **Skip it** | "not relevant", "too generic", or why | Issue gets closed with your reason |\n`;
+            comment += `| 🔄 **Someone else** | "let @name review this" | Issue gets reassigned |\n\n`;
+            comment += `After commenting, **assign this issue to Copilot** (sidebar → Assignees → type "Copilot"). The smart-review agent (\`.github/agents/smart-review.agent.md\`) handles the rest.\n`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              body: comment,
+            });

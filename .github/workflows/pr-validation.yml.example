@@ -1,0 +1,44 @@
+name: PR Validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths: ['docs/**/*.md', 'package.json', 'scripts/**', '.github/workflows/**', '.lychee.toml']
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate metadata
+        run: npx tsx scripts/validate-metadata.ts
+
+      - name: Build VitePress
+        run: npm run build
+
+      - name: Check external links in Markdown sources
+        uses: lycheeverse/lychee-action@v2
+        with:
+          # Scan the Markdown source files, not the built HTML dist.
+          # Internal/relative links are validated by the VitePress build
+          # (which fails on dead links); lychee is only responsible for
+          # verifying external http(s) URLs as configured in .lychee.toml.
+          # Scanning the HTML dist produced hundreds of false-positive
+          # "Cannot find file" errors for relative links (see #60, #62, #69).
+          # --root-dir makes root-relative links (e.g. /suggest) resolve
+          # to the docs site root so they can be filtered as file:// URLs.
+          args: >-
+            --config .lychee.toml
+            --no-progress
+            --root-dir ${{ github.workspace }}/docs
+            'docs/**/*.md'
+          fail: true

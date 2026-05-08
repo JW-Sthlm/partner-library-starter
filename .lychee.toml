@@ -1,0 +1,19 @@
+max_redirects = 5
+timeout = 30
+max_retries = 3
+accept = ["200", "204"]
+exclude_path = ["node_modules", ".vitepress/cache"]
+
+# Only check external links — VitePress internal navigation (root-relative
+# links like `/suggest` and assets under `docs/public/`) is validated by
+# the site build (dead-link check). Lychee is only responsible for
+# verifying external http(s) URLs reached from the curated content.
+include = ["^https?://"]
+
+exclude = [
+  # Local file references resolved by VitePress at the site root; these are
+  # not real broken links (the site build verifies them).
+  "^file://",
+  "https://example\\.com.*",
+  "https://login\\.microsoftonline\\.com.*",
+]

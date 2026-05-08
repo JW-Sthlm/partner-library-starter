@@ -6,9 +6,10 @@ A small, opinionated starter for building a curated link library or knowledge si
 
 ## What you get
 
-- **VitePress** static site (Vue 3 under the hood). No backend.
+- **VitePress** static site (Vue 3 under the hood). No backend required.
 - **Markdown content** in `docs/`. Edit a file, push, deploy.
 - **Azure Static Web Apps** as the deploy target. Free tier is enough.
+- **Optional agentic curation loop** — researcher agent that finds new content, smart-review agent that turns reviewer verdicts into PRs, maintenance agent that catches rot. Powered by GitHub Models (free for public repos). See [How the agentic loop works](#how-the-agentic-loop-works) below.
 - **Optional Application Insights** wiring. Tracks page views, unique visitors, outbound clicks. Silently no-ops when not configured.
 - **Optional Entra ID gating**. Ship public by default, switch on later if you need access control.
 - **Optional weekly KPI report** sample. Runs locally, emails via Outlook.
@@ -145,9 +146,85 @@ Both are templates. You'll need to edit the parameter defaults to point at your 
 
 The script depends on Outlook COM, so it's Windows + Outlook only. A cross-platform / cloud-scheduled version is not included in v1. If you need cloud scheduling, the suggested approach is to wrap the same KQL queries in your preferred CI runner with your tenant's outbound mail option.
 
-## Template reset checklist
+## How the agentic loop works
 
-After you click "Use this template" and clone, run through this:
+The starter ships an optional **agentic curation loop** that turns the library into a self-feeding system. It's off by default — every workflow lives as `.example` until you rename it.
+
+### The headline idea
+
+> Three agents work together. A **Research Agent** finds new content from feeds you trust. A **Smart Review Agent** turns a human's one-line verdict on an issue into a complete, validated, deployed PR. A **Maintenance Agent** catches link rot and stale entries. You stay in the loop only for the curation calls a human should make.
+
+### The four moving parts
+
+```
+┌─────────────────────┐       ┌───────────────────┐       ┌─────────────────┐
+│ Research Agent      │       │ Auto-Triage       │       │ Smart Review    │
+│ (daily cron)        │──────▶│ (issue opened)    │──────▶│ (issue → PR)    │
+│ scripts/research-   │       │ posts review CTAs │       │ Copilot SWE     │
+│ agent.ts            │       │ + track labels    │       │ agent           │
+└─────────────────────┘       └───────────────────┘       └────────┬────────┘
+                                                                   │
+                                                                   ▼
+                              ┌───────────────────┐       ┌─────────────────┐
+                              │ Deploy Notify     │       │ Auto-Merge      │
+                              │ (after deploy)    │◀──────│ (Copilot PR)    │
+                              │ posts live URL    │       │ approve + squash│
+                              └───────────────────┘       └─────────────────┘
+
+┌─────────────────────┐
+│ Maintenance Agent   │ ──── opens one weekly report issue ────▶ Maintenance Fixer
+│ (weekly cron)       │                                          (Copilot SWE agent
+│ scripts/maintenance-│                                          opens fix-up PRs)
+│ agent.ts            │
+└─────────────────────┘
+```
+
+### Layer 1 — cloud automation (GitHub Actions)
+
+Lives in `.github/workflows/`. See [`.github/workflows/README.md`](.github/workflows/README.md) for the full inventory. Key files:
+
+- `research-agent.yml.example` — daily run of `scripts/research-agent.ts`. Reads `sources.yml`, fetches RSS / GitHub releases / what's-new pages, scores each new item with **Claude Sonnet 4.6 via GitHub Models**, opens an issue when something passes the bar.
+- `auto-triage.yml.example` — fires when a `link-suggestion` issue opens. Posts a friendly two-CTA comment (open the link / give your verdict) and adds track labels.
+- `auto-merge-smart-review.yml.example` — auto-approves and squashes PRs from the Smart Review agent.
+- `maintenance-agent.yml.example` — weekly run of `scripts/maintenance-agent.ts`. Posts one health-check report.
+- `deploy-notify.yml.example` — after a successful deploy, posts the live page URL on the merged PR and the linked issue. Closes the loop visibly.
+
+### Layer 2 — Copilot SWE agents (`.github/agents/*.md`)
+
+These are prompts that GitHub Copilot's coding agent runs when you assign it to an issue or PR. They're system prompts, not workflows.
+
+- **`smart-review.agent.md`** — the headline agent. Reads the issue, finds the human reviewer's most recent verdict, and either: (a) validates the URL, picks the right destination file, builds a tagged entry, opens a PR with `Closes #N` (auto-merged); (b) closes the issue with the reviewer's reason; or (c) reassigns to another user. **Never bypasses a human verdict.**
+- **`maintenance-fixer.agent.md`** — picks up the weekly maintenance report and fixes the safe stuff (broken redirects, stale `lastReviewed` on healthy links, schema-invalid tags, exact-duplicate URLs). Defers anything that needs judgement.
+- **`integration-test.agent.md`** — on-demand smoke test for the loop. Build, schema, workflow parse, end-to-end issue test.
+
+### Layer 3 — local TypeScript (`scripts/`)
+
+- `research-agent.ts` — discovery + LLM scoring. Runs in CI; can also run locally with `npm run research`.
+- `maintenance-agent.ts` — link-rot, freshness, dedup, source health. `npm run maintenance` locally.
+- `validate-metadata.ts` — CI gate. Every link entry must satisfy the schema in `docs/.vitepress/data/tags.ts`.
+- `generate-browse-data.ts` — flattens all entries into a JSON index for the Browse page (and for dedup checks in the Research Agent).
+
+### Activating the loop
+
+Recommended progression — don't switch everything on at once:
+
+1. **Day 1.** Run bootstrap. Site is live with analytics. Loop is off.
+2. **Week 1.** Activate `pr-validation.yml` and `daily-link-check.yml` for hygiene. Customize `docs/.vitepress/data/tags.ts` to match your taxonomy.
+3. **Week 2.** Activate `auto-triage.yml`, `auto-merge-smart-review.yml`, `deploy-notify.yml`. Test by opening a link suggestion manually (the issue template is wired up). Set the `SITE_URL` repo variable: `gh variable set SITE_URL --body "https://your-site.example.com"`.
+4. **Week 3+.** Populate `sources.yml` (copy `sources.yml.example`) with feeds you trust, then activate `research-agent.yml`. Activate `maintenance-agent.yml` once you have enough entries to make the report meaningful.
+
+### What it costs
+
+- **GitHub Models access**: free for public repos via `GITHUB_TOKEN` with `models: read` permission. Private repos may need org-level enablement — see [GitHub Models docs](https://docs.github.com/github-models).
+- **Compute**: GitHub Actions free tier covers daily + weekly runs comfortably for a small library.
+- **Token spend**: the Research Agent caps at 3 issues per run with a temperature-0.2 prompt. Negligible.
+
+### What you customize
+
+Two starting points cover most cases:
+
+- **`docs/.vitepress/data/tags.ts`** — the tag schema is the source of truth. The shipped values (`track-a`, `track-b`, `cross-cutting`) are placeholders. Replace them with whatever taxonomy fits your library, then restart from a clean state.
+- **`auto-approve.yml.example`** — has a `categoryMap` mapping the issue form's "Suggested Category" dropdown to a file path under `/docs`. Keep it in sync with what's in `docs/` and `.github/ISSUE_TEMPLATE/link-suggestion.yml`.
 
 ## Template reset checklist
 
@@ -155,7 +232,9 @@ Most of this is automated by `scripts\rebrand.ps1` and `scripts\bootstrap.ps1`. 
 
 - [ ] Replace sample pages in `docs/` with your real content
 - [ ] Update navigation/sidebar in `docs/.vitepress/config.ts` if you change page paths
+- [ ] Customize the tag schema in `docs/.vitepress/data/tags.ts` to match your taxonomy (the shipped values like `track-a` are placeholders)
 - [ ] Decide on gating: leave public, or follow `docs/auth/entra-gating.md`
+- [ ] Decide on the agentic loop: leave the workflows as `.example` for a manually-curated library, or activate them. See [How the agentic loop works](#how-the-agentic-loop-works).
 - [ ] Edit `README.md` and `SUPPORT.md` to remove "this is Johan's experiment" framing and replace with your project's voice
 - [ ] Optional: set `bootstrap.ps1 -SkipAnalytics` if you don't want telemetry (or skip running bootstrap entirely)
 - [ ] Delete `.github/workflows/*.example` and `scripts/*.example` if you're not using them

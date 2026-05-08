@@ -1,0 +1,143 @@
+name: 🔗 Link Suggestion
+description: Suggest a new link for the library
+title: '[Link Suggestion] '
+labels: ['link-suggestion', 'triage']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a link! Fill in the form below so reviewers can
+        evaluate and add it. The fields here drive the auto-triage and
+        auto-approve workflows — keep them in sync with your `tags.ts` schema
+        and the category routing in `auto-approve.yml`.
+
+  - type: input
+    id: url
+    attributes:
+      label: Link URL
+      description: The full URL of the resource
+      placeholder: 'https://...'
+    validations:
+      required: true
+
+  - type: input
+    id: title
+    attributes:
+      label: Title
+      description: A clear, descriptive title for this resource
+      placeholder: 'A great article about something'
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A 1-3 sentence description of what this resource covers and why it's valuable
+      placeholder: 'Explains how to do X using Y, with practical examples...'
+    validations:
+      required: true
+
+  - type: dropdown
+    id: category
+    attributes:
+      label: Suggested Category
+      description: Which category file in /docs does this fit best?
+      options:
+        - Start Here
+        - Fundamentals
+        - Architecture & Patterns
+        - Tools & Utilities
+        - Tutorials
+        - Sample Code
+        - News & Updates
+    validations:
+      required: true
+
+  - type: dropdown
+    id: track
+    attributes:
+      label: Track
+      description: Which track does this apply to? (Customize values in tags.ts)
+      multiple: true
+      options:
+        - track-a
+        - track-b
+        - cross-cutting
+    validations:
+      required: true
+
+  - type: dropdown
+    id: content-type
+    attributes:
+      label: Content Type
+      options:
+        - documentation
+        - blog
+        - repo
+        - webinar
+        - course
+        - recording
+        - sample
+        - architecture
+        - tool
+        - whitepaper
+    validations:
+      required: true
+
+  - type: dropdown
+    id: audience
+    attributes:
+      label: Target Audience
+      description: Who is this resource primarily for?
+      multiple: true
+      options:
+        - architect
+        - developer
+        - operator
+        - lead
+    validations:
+      required: true
+
+  - type: dropdown
+    id: shareability
+    attributes:
+      label: Shareability
+      options:
+        - public
+        - community-only
+        - restricted
+    validations:
+      required: true
+
+  - type: dropdown
+    id: maturity
+    attributes:
+      label: Maturity Level
+      options:
+        - foundational
+        - recommended
+        - advanced
+        - experimental
+    validations:
+      required: true
+
+  - type: input
+    id: product
+    attributes:
+      label: Product / Capability
+      description: Which product(s) or capabilities does this relate to? (optional)
+      placeholder: 'Library X, Tool Y'
+
+  - type: input
+    id: pattern
+    attributes:
+      label: Pattern
+      description: Which pattern(s) or technique(s) does this relate to? (optional)
+      placeholder: 'Caching, event-driven, CQRS'
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional Context
+      description: Anything else reviewers should know

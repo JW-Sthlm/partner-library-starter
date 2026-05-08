@@ -1,6 +1,8 @@
 node_modules/
 docs/.vitepress/dist/
 docs/.vitepress/cache/
+docs/.vitepress/data/browse-data.json
+sources.yml
 *.log
 .env
 .env.*

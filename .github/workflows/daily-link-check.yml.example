@@ -1,0 +1,45 @@
+name: Daily Link Check
+
+on:
+  schedule:
+    - cron: '0 6 * * *' # Daily at 6 AM UTC
+  workflow_dispatch: # Allow manual trigger
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  link-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check all external links
+        id: lychee
+        uses: lycheeverse/lychee-action@v2
+        with:
+          # Scan the Markdown source files, not the built HTML dist.
+          # Internal/relative links are validated by the VitePress build
+          # (which fails on dead links); lychee is only responsible for
+          # verifying external http(s) URLs as configured in .lychee.toml.
+          # Scanning the HTML dist produced hundreds of false-positive
+          # "Cannot find file" errors for relative links (see #60, #62).
+          # --root-dir makes root-relative links (e.g. /suggest) resolve
+          # to the docs site root so they can be filtered as file:// URLs.
+          args: >-
+            --config .lychee.toml
+            --no-progress
+            --root-dir ${{ github.workspace }}/docs
+            'docs/**/*.md'
+          fail: false
+          output: lychee-report.md
+
+      - name: Create issue if broken links found
+        if: steps.lychee.outputs.exit_code != 0
+        uses: peter-evans/create-issue-from-file@v5
+        with:
+          title: '🔗 Broken links detected'
+          content-filepath: lychee-report.md
+          labels: 'broken-link,automated'
+          assignees: ''

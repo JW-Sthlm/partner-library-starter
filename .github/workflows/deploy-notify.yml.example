@@ -1,0 +1,107 @@
+name: Post-Deploy Link Notification
+
+# Fires after a successful deploy. Comments on the merged PR (and any
+# linked issue) with the live page URL — guaranteeing the link is actually
+# live before notifying the reviewer.
+#
+# Requires the SITE_URL repository variable. Set with:
+#   gh variable set SITE_URL --body "https://your-site.example.com"
+
+on:
+  workflow_run:
+    workflows: ["Azure Static Web Apps CI/CD"]
+    types: [completed]
+
+jobs:
+  notify:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/github-script@v7
+        env:
+          SITE_URL: ${{ vars.SITE_URL }}
+        with:
+          script: |
+            const siteUrl = (process.env.SITE_URL || '').replace(/\/$/, '');
+            if (!siteUrl) {
+              core.warning('SITE_URL repository variable is not set — skipping deploy notification.');
+              return;
+            }
+
+            const headSha = context.payload.workflow_run.head_sha;
+
+            // Find PRs associated with this commit
+            const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: headSha,
+            });
+
+            for (const pr of prs) {
+              if (!pr.merged_at) continue;
+              const hasLabel = pr.labels.some(l => l.name === 'link-suggestion');
+              if (!hasLabel) continue;
+
+              const body = pr.body || '';
+              let categoryFile = null;
+
+              const addedToMatch = body.match(/\*?\*?Added to:?\*?\*?\s*(?:.*→\s*)?`([^`]+\.md)`/i);
+              if (addedToMatch) {
+                categoryFile = addedToMatch[1];
+              }
+              if (!categoryFile) {
+                const fileMatch = body.match(/`((?:docs\/)?[\w\-\/]+\.md)`/);
+                if (fileMatch) categoryFile = fileMatch[1];
+              }
+              if (!categoryFile) {
+                core.info(`PR #${pr.number}: Could not determine category file, skipping.`);
+                continue;
+              }
+
+              const pagePath = categoryFile
+                .replace(/^docs\//, '')
+                .replace(/\.md$/, '')
+                .replace(/\/index$/, '');
+              const pageUrl = `${siteUrl}/${pagePath}`;
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr.number,
+                body: [
+                  `🚀 **Deploy complete!** The link is now live.`,
+                  ``,
+                  `🌐 **Page:** [${pagePath}](${pageUrl})`,
+                ].join('\n'),
+              });
+
+              const issueRefs = body.match(/(?:closes|fixes|resolves)\s+#(\d+)/gi) || [];
+              const issueNumbers = issueRefs.map(ref => {
+                const m = ref.match(/#(\d+)/);
+                return m ? parseInt(m[1], 10) : null;
+              }).filter(Boolean);
+
+              for (const issueNumber of issueNumbers) {
+                try {
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issueNumber,
+                    body: [
+                      `🌐 **Your link is now live!**`,
+                      ``,
+                      `The site has been deployed and your link is available at:`,
+                      `👉 [${pagePath}](${pageUrl})`,
+                    ].join('\n'),
+                  });
+                } catch (err) {
+                  core.warning(`Could not comment on issue #${issueNumber}: ${err.message}`);
+                }
+              }
+
+              core.info(`PR #${pr.number}: Notified about deploy to ${pageUrl}`);
+            }

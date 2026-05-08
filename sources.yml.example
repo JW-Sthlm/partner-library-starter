@@ -1,0 +1,45 @@
+# sources.yml — feeds the Research Agent
+#
+# Each source is checked daily by .github/workflows/research-agent.yml.example.
+# The agent fetches new items, scores them with the GitHub Models API,
+# and opens an issue for human review when it finds something promising.
+#
+# To activate:
+#   1. Copy this file to `sources.yml` (no .example suffix).
+#   2. Replace these examples with feeds relevant to your library's domain.
+#   3. Rename the workflow file to `research-agent.yml`.
+#
+# Field reference:
+#   name        Display name shown in issue bodies and reports.
+#   type        rss | github_releases | html_whats_new
+#   url         For rss: the feed URL.
+#               For github_releases: the repo in `owner/name` form.
+#               For html_whats_new: the page URL (treated as a "this page may
+#               have updates" probe; the LLM decides whether to surface it).
+#   track       The track tag this source maps to (must match tags.ts).
+#   categories  Suggested target category files when items land. The LLM
+#               will pick the best one based on content.
+#   keywords    Lowercase strings to filter RSS items by title/description.
+#               At least one keyword must match for an item to be considered.
+
+sources:
+  - name: GitHub Engineering Blog
+    type: rss
+    url: https://github.blog/engineering/feed/
+    track: cross-cutting
+    categories: [news-and-updates, architecture-and-patterns]
+    keywords: [release, design, architecture, performance]
+
+  - name: VitePress Releases
+    type: github_releases
+    url: vuejs/vitepress
+    track: cross-cutting
+    categories: [tools-and-utilities]
+    keywords: [release]
+
+  - name: Awesome Self-Hosted (curated list)
+    type: html_whats_new
+    url: https://github.com/awesome-selfhosted/awesome-selfhosted
+    track: track-a
+    categories: [tools-and-utilities]
+    keywords: [self-hosted]

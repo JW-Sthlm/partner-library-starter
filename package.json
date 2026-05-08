@@ -3,14 +3,20 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Starter template for a Markdown-driven partner library on VitePress + Azure Static Web Apps.",
+  "description": "Starter template for a Markdown-driven partner library on VitePress + Azure Static Web Apps, with optional agentic curation loop.",
   "license": "MIT",
   "scripts": {
     "docs:dev": "vitepress dev docs",
-    "docs:build": "vitepress build docs",
-    "docs:preview": "vitepress preview docs"
+    "docs:build": "npm run generate-browse-data && vitepress build docs",
+    "docs:preview": "vitepress preview docs",
+    "build": "npm run docs:build",
+    "generate-browse-data": "tsx scripts/generate-browse-data.ts",
+    "validate-metadata": "tsx scripts/validate-metadata.ts",
+    "research": "tsx scripts/research-agent.ts",
+    "maintenance": "tsx scripts/maintenance-agent.ts"
   },
   "devDependencies": {
+    "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitepress": "^1.6.3",
     "vue": "^3.5.13"

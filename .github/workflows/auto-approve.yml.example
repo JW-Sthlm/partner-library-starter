@@ -1,0 +1,170 @@
+name: Auto-Add Approved Link (Fallback)
+
+# FALLBACK PATH: Fires when a reviewer closes a link-suggestion issue
+# directly (without assigning to Copilot).
+#
+# The PRIMARY path is to comment + assign to Copilot, which triggers the
+# smart-review agent (.github/agents/smart-review.agent.md) for intelligent
+# validation, dedup checking, and optimal placement.
+#
+# This workflow is the simple fallback. Customize the categoryMap below
+# to match the file structure under /docs in your library.
+
+on:
+  issues:
+    types: [closed]
+
+jobs:
+  add-link:
+    if: |
+      contains(github.event.issue.labels.*.name, 'link-suggestion') &&
+      github.event.issue.state_reason == 'completed'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    env:
+      # Set this to your live site URL (e.g. https://your-app.azurestaticapps.net).
+      # Configure in repo settings → Variables, or hardcode if you prefer.
+      SITE_URL: ${{ vars.SITE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate link entry and add to library
+        uses: actions/github-script@v7
+        env:
+          SITE_URL: ${{ env.SITE_URL }}
+        with:
+          script: |
+            const fs = require('fs');
+            const issue = context.payload.issue;
+            const body = issue.body || '';
+            const siteUrl = process.env.SITE_URL || '';
+
+            // Parse GitHub issue form fields (format: ### Label\n\nValue)
+            function parseField(label) {
+              const re = new RegExp(`### ${label.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\s*\\n+([\\s\\S]*?)(?=\\n### |$)`);
+              const m = body.match(re);
+              if (!m) return '';
+              return m[1].trim().replace(/^_No response_$/i, '');
+            }
+
+            const url = parseField('Link URL') || (() => {
+              const m = body.match(/(https?:\/\/\S+)/);
+              return m ? m[1] : null;
+            })();
+            const title = parseField('Title') || issue.title.replace(/^\[Link Suggestion\]\s*/i, '').trim();
+            const description = parseField('Description');
+            const suggestedCategory = parseField('Suggested Category');
+            const track = parseField('Track') || 'cross-cutting';
+            const contentType = parseField('Content Type') || 'documentation';
+            const audience = parseField('Target Audience') || 'architect, developer';
+            const shareability = parseField('Shareability') || 'public';
+            const maturity = parseField('Maturity Level') || 'recommended';
+            const product = parseField('Product / Capability') || '—';
+            const pattern = parseField('Pattern') || '—';
+
+            if (!url) {
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                state: 'open',
+              });
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: '⚠️ Could not extract a URL from this issue. Please add the link manually, then close this issue again.',
+              });
+              return;
+            }
+
+            // ── Category routing ──
+            // Customize this map to match the file structure under /docs in your library.
+            // Each key is the value the user picks in the issue form's "Suggested Category"
+            // dropdown; each value is the path of the destination Markdown file.
+            const categoryMap = {
+              'Start Here': 'start-here.md',
+              'Fundamentals': 'fundamentals.md',
+              'Architecture & Patterns': 'architecture-and-patterns.md',
+              'Tools & Utilities': 'tools-and-utilities.md',
+              'Tutorials': 'tutorials.md',
+              'Sample Code': 'sample-code.md',
+              'News & Updates': 'news-and-updates.md',
+            };
+
+            let categoryFile = categoryMap[suggestedCategory] || 'fundamentals.md';
+            const filePath = `docs/${categoryFile}`;
+
+            // Content type emoji mapping
+            const typeEmoji = {
+              documentation: '📖', blog: '📝', repo: '💻', webinar: '🎥',
+              course: '🎓', recording: '📹', sample: '🧪', architecture: '🏗️',
+              tool: '🔧', whitepaper: '📄',
+            };
+            const emoji = typeEmoji[contentType] || '📖';
+
+            // Build the link entry using form data.
+            // Tag order must match the tagKeys array in scripts/validate-metadata.ts
+            // and scripts/generate-browse-data.ts.
+            const today = new Date().toISOString().split('T')[0];
+            const reviewer = issue.assignee?.login || issue.user?.login || 'team';
+            const entry = [
+              ``,
+              `### ${emoji} [${title}](${url})`,
+              ``,
+              `${description || title}`,
+              ``,
+              `> **Tags:** \`${track}\` · \`${contentType}\` · \`${audience}\` · \`${shareability}\` · \`${maturity}\` · \`${product}\` · \`${pattern}\` · \`@${reviewer}\` · \`${today}\``,
+              ``,
+            ].join('\n');
+
+            // Append to the target file
+            const content = fs.readFileSync(filePath, 'utf-8');
+            fs.writeFileSync(filePath, content.trimEnd() + '\n' + entry);
+
+            // Create branch, commit, PR, and auto-merge
+            const timestamp = Date.now();
+            const branchName = `auto/add-link-issue-${issue.number}-${timestamp}`;
+            const { execSync } = require('child_process');
+            execSync(`git config user.name "github-actions[bot]"`);
+            execSync(`git config user.email "github-actions[bot]@users.noreply.github.com"`);
+            execSync(`git checkout -b ${branchName}`);
+            execSync(`git add "${filePath}"`);
+            execSync(`git commit -m "Add: ${title} (closes #${issue.number})"`);
+            execSync(`git push origin ${branchName}`);
+
+            const pr = await github.rest.pulls.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Add: ${title}`,
+              body: `Auto-generated from issue #${issue.number}.\n\n**URL:** ${url}\n**Added to:** \`${categoryFile}\``,
+              head: branchName,
+              base: 'main',
+            });
+
+            await github.rest.pulls.merge({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.data.number,
+              merge_method: 'squash',
+            });
+
+            // Build the live page URL (optional — only if SITE_URL is set)
+            let pageMessage;
+            if (siteUrl) {
+              const pagePath = categoryFile.replace(/\.md$/, '').replace(/\/index$/, '/');
+              const pageUrl = `${siteUrl.replace(/\/$/, '')}/${pagePath}`;
+              pageMessage = `✅ **Link added!**\n\n📄 Added to **[${categoryFile}](${pageUrl})**\n🔗 Link: ${url}\n🔀 PR #${pr.data.number} merged\n🚀 Site will update in ~2 minutes — [view the page](${pageUrl})`;
+            } else {
+              pageMessage = `✅ **Link added!**\n\n📄 Added to \`${categoryFile}\`\n🔗 Link: ${url}\n🔀 PR #${pr.data.number} merged\n\n_Tip: set the \`SITE_URL\` repository variable to include a live page link in this comment._`;
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              body: pageMessage,
+            });
