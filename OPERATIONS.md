@@ -10,7 +10,9 @@ For the basic local-dev and deploy flow, see the [README](README.md).
 
 The site runs fine without analytics. Set it up only if you want to see who's visiting.
 
-### Recommended: Azure Portal
+> **Quickest path:** run `.\scripts\bootstrap.ps1 -Name <slug>` from the repo root. It creates the resource group, Log Analytics workspace, Application Insights, and Static Web App, and wires the GitHub secrets. The instructions below are the manual equivalent if you want to provision pieces individually or already have an existing resource to reuse.
+
+### Recommended (manual): Azure Portal
 
 1. Sign in to [portal.azure.com](https://portal.azure.com).
 2. Search **Application Insights** → **+ Create**.

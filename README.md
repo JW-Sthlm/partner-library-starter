@@ -36,9 +36,37 @@ npm run docs:dev
 
 That's the core. Everything below is optional.
 
-## Deploy to Azure Static Web Apps (recommended)
+## Deploy to Azure Static Web Apps
 
-The easiest path is the Azure Portal. Don't try to ship the example workflow as-is.
+Two paths. Pick one.
+
+### One-command provision (recommended)
+
+If you have **Azure CLI** and **GitHub CLI** installed and signed in, run from the root of your cloned repo:
+
+```powershell
+# PowerShell 7+ (works on Windows, macOS, Linux)
+.\scripts\bootstrap.ps1 -Name <short-slug>
+```
+
+That's it. The script provisions a resource group, Application Insights (workspace-based), and a Static Web App; sets the two GitHub secrets (`AZURE_STATIC_WEB_APPS_API_TOKEN`, `VITE_APPINSIGHTS_CONNECTION_STRING`); activates the deploy workflow; and pushes. First deploy runs in 2 to 3 minutes.
+
+Useful flags:
+
+```powershell
+.\scripts\bootstrap.ps1 -Name acme -Location northeurope    # different region
+.\scripts\bootstrap.ps1 -Name acme -SkipAnalytics           # no telemetry
+.\scripts\bootstrap.ps1 -Name acme -SkipPush                # don't auto-push
+.\scripts\bootstrap.ps1 -Name acme -SubscriptionId "<id>"   # pick a subscription
+```
+
+Run `Get-Help .\scripts\bootstrap.ps1 -Full` for the full reference.
+
+Prerequisites: `az login`, `gh auth login`, repo cloned with a GitHub remote, PowerShell 7+.
+
+### Manual fallback: Azure Portal
+
+If you'd rather click through the Portal:
 
 1. Sign in to [portal.azure.com](https://portal.azure.com).
 2. Create a new **Static Web App**.
@@ -48,15 +76,18 @@ The easiest path is the Azure Portal. Don't try to ship the example workflow as-
    - **App location:** `docs`
    - **Api location:** *(leave blank)*
    - **Output location:** `docs/.vitepress/dist`
-3. Azure auto-creates a workflow file in `.github/workflows/` and adds the `AZURE_STATIC_WEB_APPS_API_TOKEN_*` secret to your repo. Push, and your first deploy runs.
+3. Azure auto-creates a workflow file in `.github/workflows/` and adds an `AZURE_STATIC_WEB_APPS_API_TOKEN_*` secret to your repo. Push, and your first deploy runs.
+4. To enable analytics, see "Optional: analytics" below. The Portal-generated workflow does **not** inject `VITE_APPINSIGHTS_CONNECTION_STRING` for you. You'll need to patch it.
 
-**A reference example workflow lives at `.github/workflows/azure-static-web-apps.yml.example`.** It is intentionally inactive (no `.yml` extension, no secrets wired). It exists so you can see the full deploy shape if you ever want to hand-author one. The Portal-generated workflow is the supported path.
+A reference workflow lives at `.github/workflows/azure-static-web-apps.yml.example` with the analytics env-injection already wired in. The bootstrap script renames this to the active filename. If you go the Portal route, either ignore the example or use it as a model for the Portal-generated one.
 
 ## Optional: analytics
 
-The site reads a build-time env var `VITE_APPINSIGHTS_CONNECTION_STRING`. When unset, all telemetry calls no-op and the site works normally. When set, you get page views, unique visitors, and outbound link tracking in Application Insights.
+If you used the bootstrap script, analytics is already wired. Skip this section.
 
-To turn it on:
+Going manual? The site reads a build-time env var `VITE_APPINSIGHTS_CONNECTION_STRING`. When unset, all telemetry calls no-op and the site works normally. When set, you get page views, unique visitors, and outbound link tracking in Application Insights.
+
+To turn it on after a Portal deploy:
 
 1. **Provision Application Insights.** Easiest in the Portal: search "Application Insights" → Create. Pick **workspace-based**. Note the connection string from the resource overview.
 2. **Add a GitHub secret** in your repo: `Settings → Secrets and variables → Actions → New repository secret`
@@ -103,8 +134,7 @@ After you click "Use this template" and clone, run through this:
 - [ ] Update site title in `docs/.vitepress/config.ts`
 - [ ] Replace sample pages in `docs/` with your own content
 - [ ] Update navigation/sidebar in `docs/.vitepress/config.ts`
-- [ ] Decide on deploy: Portal SWA wizard (recommended) or hand-author from the example
-- [ ] Decide on analytics: provision App Insights and add the secret, or leave disabled
+- [ ] Run `.\scripts\bootstrap.ps1 -Name <slug>` to provision Azure and deploy (or follow the Portal fallback)
 - [ ] Decide on gating: leave public, or follow `docs/auth/entra-gating.md`
 - [ ] Update `LICENSE` copyright line to your name/org
 - [ ] Edit `SUPPORT.md` and `README.md` to remove "this is Johan's experiment" framing and replace with your project's voice

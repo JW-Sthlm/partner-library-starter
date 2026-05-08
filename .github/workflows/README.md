@@ -1,15 +1,19 @@
-# Reference workflow — NOT ACTIVE
+# Reference workflow
 
-This directory is intentionally light. The recommended way to set up deployment is to let the **Azure Static Web Apps Portal wizard** create the workflow file for you. It will generate a working YAML and add the deployment token as a repository secret in one step.
-
-See the README under "Deploy to Azure Static Web Apps" for the full Portal flow.
+This directory ships one workflow file as `.example`. The included `scripts/bootstrap.ps1` activates it for you when you provision Azure resources.
 
 ## What's here
 
-- `azure-static-web-apps.yml.example` — a reference workflow showing the full deploy shape, with the analytics secret injection already wired in. **It is named `.example` so GitHub does not auto-run it.** Don't rename it to `.yml` unless you understand each line and have the matching secrets set.
+- `azure-static-web-apps.yml.example` — the deploy workflow with analytics env-injection already wired in. The `.example` suffix prevents GitHub Actions from running it before you have the matching secrets set.
 
-## When you might want to hand-author
+## How it gets activated
 
-If you're not using the Portal (e.g. deploying from a fork, running multiple environments, or doing something exotic), copy `azure-static-web-apps.yml.example` to `azure-static-web-apps.yml`, replace the placeholder secret name with your real one, and commit.
+Two ways:
 
-The Portal-generated workflow does **not** include the `VITE_APPINSIGHTS_CONNECTION_STRING` env injection. If you want analytics, you must edit the Portal-generated workflow and add the `env:` block to the build step. See the README "Optional: analytics" section.
+1. **Bootstrap script (recommended).** `scripts/bootstrap.ps1` provisions Azure, sets the `AZURE_STATIC_WEB_APPS_API_TOKEN` and `VITE_APPINSIGHTS_CONNECTION_STRING` secrets, renames this file to `azure-static-web-apps.yml`, commits, and pushes. First deploy fires automatically. See the root README.
+2. **Manual.** Rename `azure-static-web-apps.yml.example` to `azure-static-web-apps.yml`, set both secrets in `Settings → Secrets and variables → Actions`, then push.
+
+## Azure Portal alternative
+
+If you provision your Static Web App through the Azure Portal wizard instead, the Portal generates its own workflow file with the deployment token name baked in (e.g. `AZURE_STATIC_WEB_APPS_API_TOKEN_HAPPY_DESERT_12345`). The Portal-generated workflow does **not** include the `VITE_APPINSIGHTS_CONNECTION_STRING` env injection. If you want analytics with that flow, edit the Portal-generated workflow and add the `env:` block from the example file. See the README "Optional: analytics" section.
+
