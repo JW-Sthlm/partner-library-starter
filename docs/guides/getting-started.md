@@ -39,6 +39,16 @@ Three things to edit first:
 
 Add new pages by creating a new `.md` file under `docs/` and linking to it from your sidebar config.
 
+### Adding an entry
+
+The pattern in `docs/resources.md` is one bullet per resource:
+
+```markdown
+- **[Resource name](https://example.com)** — one-line description of why it matters. *Type*
+```
+
+`*Type*` is optional — use it if you want to signal what kind of source it is (Blog, Whitepaper, Tool, Reference, etc.). For longer resources that need their own page, create a new file under `docs/` and link to it from `resources.md` or your sidebar.
+
 ## 4. Build for production
 
 ```bash
@@ -53,7 +63,7 @@ npm run docs:preview
 
 ## 5. Deploy
 
-The recommended path is to let the Azure Static Web Apps Portal wizard wire up deployment for you. See the [README](../) under "Deploy to Azure Static Web Apps".
+The fastest path is `scripts\bootstrap.ps1` from the repo root — it provisions Azure resources, sets the GitHub secrets, and activates the deploy workflow in one go. See the [README](../) under "Deploy your site" for the command and prerequisites.
 
 ## 6. Optional: enable analytics
 

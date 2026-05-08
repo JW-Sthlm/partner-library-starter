@@ -1,36 +1,17 @@
 # Resources
 
-A simple curated list of links is the bread and butter of a partner library site. Replace this content with your own.
+A short, opinionated reading list. Replace these entries with your own — the structure below is the pattern to copy.
 
-## Foundational reading
+## Reference architectures
 
-- **[VitePress documentation](https://vitepress.dev/)** — the static site generator powering this template.
-- **[Azure Static Web Apps](https://learn.microsoft.com/azure/static-web-apps/)** — the hosting platform.
-- **[Application Insights JS SDK](https://learn.microsoft.com/azure/azure-monitor/app/javascript)** — for the optional analytics wiring.
+- **[The Twelve-Factor App](https://12factor.net)** — Methodology for building modern, scalable web apps. *Whitepaper*
+- **[Architectural Decision Records](https://adr.github.io)** — Capture important architectural decisions with context, rationale, and consequences. *Pattern*
 
-## Patterns to copy
+## Engineering practices
 
-- **[Markdown frontmatter](https://vitepress.dev/guide/frontmatter)** — for tagging and categorizing pages.
-- **[VitePress search](https://vitepress.dev/reference/default-theme-search)** — local search built in, no extra service required.
-- **[Custom Vue components in Markdown](https://vitepress.dev/guide/using-vue)** — when plain Markdown isn't enough.
+- **[Trunk-based development](https://trunkbaseddevelopment.com)** — Branching model that keeps releases small, frequent, and low-risk. *Practice*
+- **[Continuous Delivery](https://continuousdelivery.com)** — The book that defined modern release engineering. *Book*
 
-## Suggested next steps
+## Community
 
-- Replace this list with your own curated links, organized by topic.
-- Add tags or categories using frontmatter.
-- Consider grouping resources by audience (architects, developers, decision-makers).
-- Keep it focused. A short, opinionated list beats an exhaustive one.
-
----
-
-## Adding a new resource
-
-To add a new entry, edit this file (`docs/resources.md`) and add a Markdown link. Push to your repo and the deploy workflow will rebuild the site.
-
-For longer entries with descriptions, use a list:
-
-```markdown
-- **[Resource name](https://example.com)** — one-line description of why it matters.
-```
-
-For tagged entries, add a `tags` array in frontmatter on individual pages and group them on a category page.
+- **[Awesome lists](https://github.com/sindresorhus/awesome)** — The community-curated list format that inspired this template. *Pattern*
