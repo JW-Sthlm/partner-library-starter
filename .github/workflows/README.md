@@ -42,11 +42,9 @@ Four workflows that turn the library into a self-maintaining feed: discovery →
 
 ## Activation summary
 
-The minimum to get a site live is `azure-static-web-apps.yml` (handled by bootstrap). Everything else is opt-in. A reasonable progression:
+Flip everything on day one. The loop is safe out of the box — every agent waits for a human verdict and `pr-validation.yml` gates every PR. Bootstrap activates the deploy workflow; the rest you activate by renaming `.yml.example` → `.yml`.
 
-1. **Day 1.** Bootstrap → site live with analytics.
-2. **Week 1.** Activate `pr-validation.yml` and `daily-link-check.yml` for hygiene.
-3. **Week 2+.** When you have curated content patterns and a small reviewer pool, activate the agentic loop one workflow at a time.
+If you want to start manual instead, leave `research-agent.yml` and `maintenance-agent.yml` as `.example`. Triage / smart-review / deploy-notify still work for issues you open by hand via the link-suggestion template.
 
 ## Required secrets and variables
 

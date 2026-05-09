@@ -206,12 +206,19 @@ These are prompts that GitHub Copilot's coding agent runs when you assign it to 
 
 ### Activating the loop
 
-Recommended progression — don't switch everything on at once:
+Flip everything on day one if you want. The loop is designed to be safe out of the box: every agent waits for a human verdict, every PR runs through `pr-validation.yml`, and nothing merges without your reviewer's `approve:` comment on the issue.
 
-1. **Day 1.** Run bootstrap. Site is live with analytics. Loop is off.
-2. **Week 1.** Activate `pr-validation.yml` and `daily-link-check.yml` for hygiene. Customize `docs/.vitepress/data/tags.ts` to match your taxonomy.
-3. **Week 2.** Activate `auto-triage.yml`, `auto-merge-smart-review.yml`, `deploy-notify.yml`. Test by opening a link suggestion manually (the issue template is wired up). Set the `SITE_URL` repo variable: `gh variable set SITE_URL --body "https://your-site.example.com"`.
-4. **Week 3+.** Populate `sources.yml` (copy `sources.yml.example`) with feeds you trust, then activate `research-agent.yml`. Activate `maintenance-agent.yml` once you have enough entries to make the report meaningful.
+The full activation sequence:
+
+1. Run `scripts/bootstrap.ps1`. Site is live with analytics.
+2. Customize `docs/.vitepress/data/tags.ts` to match your taxonomy. Update `categoryMap` in `auto-approve.yml.example` to match your `docs/` structure.
+3. Set the `SITE_URL` repo variable: `gh variable set SITE_URL --body "https://your-site.example.com"`.
+4. Copy `sources.yml.example` to `sources.yml` and add feeds you trust.
+5. Rename every `*.yml.example` in `.github/workflows/` to `*.yml`. Commit and push.
+
+That's it. The Research Agent runs the next morning, posts its first issues, and the loop is alive.
+
+If you'd rather start manual: leave `research-agent.yml` and `maintenance-agent.yml` as `.example` for now. The triage / smart-review / deploy-notify workflows still work for issues you open by hand via the link-suggestion template.
 
 ### What it costs
 
