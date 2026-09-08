@@ -23,5 +23,8 @@
   },
   "dependencies": {
     "@microsoft/applicationinsights-web": "^3.4.1"
+  },
+  "overrides": {
+    "vite": "7.3.6"
   }
 }
