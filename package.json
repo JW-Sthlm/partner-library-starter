@@ -16,7 +16,7 @@
     "maintenance": "tsx scripts/maintenance-agent.ts"
   },
   "devDependencies": {
-    "tsx": "^4.19.0",
+    "tsx": "^4.23.13",
     "typescript": "^5.7.0",
     "vitepress": "^1.6.3",
     "vue": "^3.5.13"
